@@ -177,6 +177,17 @@ class mTP:
             
             self._write_results_to_sheet(ws, final_results)
 
+        # Удаление строк со значением "Краткое наименование" в первом столбце на каждой вкладке
+        for ws in [ws_valves, ws_control]:
+            rows_to_delete = []
+            for row_idx in range(1, ws.max_row + 1):
+                cell_value = ws.cell(row=row_idx, column=1).value
+                if cell_value and str(cell_value).strip() == "Краткое наименование":
+                    rows_to_delete.append(row_idx)
+            # Удаляем строки в обратном порядке, чтобы не сбивать индексацию
+            for row_idx in reversed(rows_to_delete):
+                ws.delete_rows(row_idx, 1)
+
         parent_dir = os.path.dirname(search_folder)
         wb.save(f'{parent_dir}/{kks}.xlsx')
         print(f"✅ Результаты сохранены в '{kks}.xlsx'")

@@ -73,7 +73,7 @@ class my_obj_finder:
             return pages
 
     def look_for_objects(self):
-        model = YOLO('best_v4.pt')
+        model = YOLO('best_v5.pt')
 
         results = []
         pdf = pdfium.PdfDocument(self.filePath)
