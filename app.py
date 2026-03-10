@@ -1,12 +1,18 @@
+"""
+Главное приложение для автоматизации верификации технологических схем (ТЗА).
+
+Модуль содержит графический интерфейс пользователя для обработки PDF документов
+с технологическими схемами и таблицами.
+"""
 import sys
+import os
 
 from PyQt5.QtGui import QFont
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QFileDialog, QLabel, QMessageBox, \
-    QLineEdit, QTextEdit
-import os
-import re
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QPushButton, 
+    QFileDialog, QLabel, QMessageBox, QLineEdit, QTextEdit
+)
 from openpyxl import Workbook
-from openpyxl.styles import PatternFill, Font, Alignment
 
 from full_parsing_2 import mTP
 from tzaSchemes import my_obj_finder, cleanup_output_images
@@ -14,132 +20,204 @@ from tzaTables import myPdfReader
 
 
 class FileProcessorApp(QWidget):
+    """
+    Главное окно приложения для обработки технологических схем.
+    
+    Предоставляет графический интерфейс для выбора папок с исходными данными
+    и запуска процесса обработки PDF файлов.
+    """
+    
     def __init__(self):
         super().__init__()
         self.initUI()
 
     def log_message(self, message):
-        """Добавить сообщение в поле логов"""
+        """
+        Добавляет сообщение в поле логов.
+        
+        Args:
+            message: Текст сообщения для отображения
+        """
         self.log_text.append(message)
-        # Прокручиваем вниз, чтобы показать последнее сообщение
-        self.log_text.verticalScrollBar().setValue(self.log_text.verticalScrollBar().maximum())
-        # Обновляем интерфейс, чтобы изменения отобразились сразу
+        self.log_text.verticalScrollBar().setValue(
+            self.log_text.verticalScrollBar().maximum()
+        )
         QApplication.processEvents()
 
-    def main(self, files_path, xls_path):
-
-        path_to_pdf = f"{xls_path}/SCHEMES"
-        path_to_xlsx = f"{xls_path}/TABLES"
+    def process_files(self, files_path, xls_path):
+        """
+        Основной метод обработки файлов.
+        
+        Args:
+            files_path: Путь к папке с исходными PDF файлами
+            xls_path: Путь к папке для сохранения результатов
+        """
+        schemes_path = os.path.join(xls_path, "SCHEMES")
+        tables_path = os.path.join(xls_path, "TABLES")
 
         self.log_message("Начало обработки файлов...")
         self.log_message(f"Входная папка: {files_path}")
         self.log_message(f"Выходная папка: {xls_path}")
 
-        if not os.path.exists(path_to_pdf):
-            os.makedirs(path_to_pdf)
-            self.log_message(f"Создана папка: {path_to_pdf}")
-        if not os.path.exists(path_to_xlsx):
-            os.makedirs(path_to_xlsx)
-            self.log_message(f"Создана папка: {path_to_xlsx}")
+        # Создание необходимых директорий
+        self._create_output_directories(schemes_path, tables_path)
+        
+        # Обработка схем
+        self._process_schemes(files_path, schemes_path)
+        
+        # Обработка таблиц
+        self._process_tables(files_path, tables_path)
+        
+        # Финальный парсинг и сравнение данных
+        self._parse_and_compare(schemes_path, tables_path, xls_path)
+        
+        self.log_message("\n=== Обработка завершена успешно! ===")
 
-        # ----------------схемы
+    def _create_output_directories(self, schemes_path, tables_path):
+        """Создает необходимые директории для выходных данных."""
+        for path in [schemes_path, tables_path]:
+            if not os.path.exists(path):
+                os.makedirs(path)
+                self.log_message(f"Создана папка: {path}")
+
+    def _process_schemes(self, files_path, schemes_path):
+        """
+        Обрабатывает технологические схемы.
+        
+        Args:
+            files_path: Путь к папке с PDF файлами
+            schemes_path: Путь к папке для сохранения схем
+        """
         self.log_message("\n=== Обработка схем ===")
         dir_list = os.listdir(files_path)
         self.log_message(f"Найдено файлов: {len(dir_list)}")
 
-        for idx, f in enumerate(dir_list, 1):
-            filepath = os.path.abspath(f"{files_path}/{f}")
-            kks = f.strip('.pdf')
+        for idx, filename in enumerate(dir_list, 1):
+            if not filename.lower().endswith('.pdf'):
+                continue
+                
+            filepath = os.path.abspath(os.path.join(files_path, filename))
+            kks = filename.replace('.pdf', '')
 
-            self.log_message(f"[{idx}/{len(dir_list)}] Обработка схемы: {f}")
-            myOF = my_obj_finder(filepath)
-            myOF.find_imp_pages()
-            res = myOF.look_for_objects()
-            cords = myOF.get_coords(res)
-            d = myOF.get_KKS(cords)
-            output_file = f"{xls_path}/SCHEMES/{kks}.xlsx"
-            myOF.write_excel(d, output_file)
+            self.log_message(f"[{idx}/{len(dir_list)}] Обработка схемы: {filename}")
+            
+            obj_finder = my_obj_finder(filepath)
+            obj_finder.find_imp_pages()
+            results = obj_finder.look_for_objects()
+            coords = obj_finder.get_coords(results)
+            kks_dict = obj_finder.get_KKS(coords)
+            
+            output_file = os.path.join(schemes_path, f"{kks}.xlsx")
+            obj_finder.write_excel(kks_dict, output_file)
             self.log_message(f"  ✓ Создан файл: {kks}.xlsx")
-        # -------------------------таблицы
+    def _process_tables(self, files_path, tables_path):
+        """
+        Извлекает таблицы из PDF файлов.
+        
+        Args:
+            files_path: Путь к папке с PDF файлами
+            tables_path: Путь к папке для сохранения таблиц
+        """
         self.log_message("\n=== Обработка таблиц ===")
-        #
-        # if hasattr(self, 'input_folder') and hasattr(self, 'output_folder'):
-        #     # Получаем список PDF файлов в выбранной папке
-        #     pdf_files = [f for f in os.listdir(self.input_folder) if f.lower().endswith('.pdf')]
-        #
-        #     if pdf_files:
-        for idx, f in enumerate(dir_list, 1):
-            filepath = os.path.abspath(f"{files_path}/{f}")
-            self.log_message(f"[{idx}/{len(dir_list)}] Извлечение таблиц из: {f}")
-            k = myPdfReader()
-            imp_page_groups = k.find_imp_pages(filepath)
-            i = 0
-            kks = f.strip('.pdf')
-            for group in imp_page_groups:
-                imp_pages = [int(x) for x in group]
-                l = myPdfReader()
-                tables = l.extract_imp_tables(filepath, pages=imp_pages)
-                ind = 0
-                list_df = []
-                combined_data = []
-                if k.names.count(k.names[i]) > 1:
-                    excelPath = f'{xls_path}/TABLES/{kks}_{k.names[i]}_{i}.xlsx'
+        dir_list = os.listdir(files_path)
+
+        for idx, filename in enumerate(dir_list, 1):
+            if not filename.lower().endswith('.pdf'):
+                continue
+                
+            filepath = os.path.abspath(os.path.join(files_path, filename))
+            self.log_message(f"[{idx}/{len(dir_list)}] Извлечение таблиц из: {filename}")
+            
+            pdf_reader = myPdfReader()
+            page_groups = pdf_reader.find_imp_pages(filepath)
+            kks = filename.replace('.pdf', '')
+            
+            for group_idx, group in enumerate(page_groups):
+                pages = [int(x) for x in group]
+                table_reader = myPdfReader()
+                tables = table_reader.extract_imp_tables(filepath, pages=pages)
+                
+                # Формирование имени файла
+                table_name = pdf_reader.names[group_idx]
+                if pdf_reader.names.count(table_name) > 1:
+                    excel_path = os.path.join(tables_path, f"{kks}_{table_name}_{group_idx}.xlsx")
                 else:
-                    excelPath = f'{xls_path}/TABLES/{kks}_{k.names[i]}.xlsx'
+                    excel_path = os.path.join(tables_path, f"{kks}_{table_name}.xlsx")
 
-                workbook = Workbook()
-                workbook.active.title = "CommonList"
-                worksheet = workbook['CommonList']
+                # Создание Excel файла
+                self._create_table_excel(tables, excel_path, table_name, 
+                                        pdf_reader.names[group_idx])
+                self.log_message(f"  ✓ Создан файл: {kks}_{table_name}.xlsx")
 
-                if tables:
-                    combined_data.extend(tables[0])
+    def _create_table_excel(self, tables, excel_path, table_name, original_name):
+        """
+        Создает Excel файл с извлеченными таблицами.
+        
+        Args:
+            tables: Список таблиц для сохранения
+            excel_path: Путь к выходному файлу
+            table_name: Название таблицы
+            original_name: Оригинальное название из PDF
+        """
+        workbook = Workbook()
+        workbook.active.title = "CommonList"
+        worksheet = workbook['CommonList']
 
-                for table in tables[1:]:
-                    if k.names[i] in ["Перечень сигналов", "Перечень алгоритмов"]:
-                        combined_data.extend(table[1:])
-                    else:
-                        combined_data.extend(table[4:])
-                for row in combined_data:
-                    worksheet.append(row)
+        combined_data = []
+        if tables:
+            combined_data.extend(tables[0])
 
-                worksheet.insert_rows(1)
-                worksheet['A1'] = f"{k.names[i]}"
+        # Объединение данных из всех таблиц
+        for table in tables[1:]:
+            if original_name in ["Перечень сигналов", "Перечень алгоритмов"]:
+                combined_data.extend(table[1:])
+            else:
+                combined_data.extend(table[4:])
 
-                # Проходим по всем ячейкам
-                for row in worksheet.iter_rows():
-                    for cell in row:
-                        if isinstance(cell.value, str):  # Проверяем, является ли значение ячейки строкой
-                            # Удаляем (cid:13) из текста
-                            cell.value = cell.value.replace('(cid:13)', '')
+        # Запись данных
+        for row in combined_data:
+            worksheet.append(row)
 
-                workbook.save(excelPath)
-                self.log_message(f"  ✓ Создан файл: {kks}_{k.names[i]}.xlsx")
-                i += 1
+        worksheet.insert_rows(1)
+        worksheet['A1'] = table_name
 
-        # self.show_message("Успешно!", "PDF файлы обработаны и сохранены.")
+        # Очистка артефактов PDF
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str):
+                    cell.value = cell.value.replace('(cid:13)', '')
 
-        # ------------------------------парсинг
+        workbook.save(excel_path)
+
+    def _parse_and_compare(self, schemes_path, tables_path, output_path):
+        """
+        Выполняет финальный парсинг и сравнение данных схем и таблиц.
+        
+        Args:
+            schemes_path: Путь к папке со схемами
+            tables_path: Путь к папке с таблицами
+            output_path: Путь для сохранения результатов
+        """
         self.log_message("\n=== Финальный парсинг данных ===")
-        dir_list = os.listdir(f"{xls_path}/SCHEMES")
-        self.log_message(f"Обработка {len(dir_list)} схем...")
+        scheme_files = os.listdir(schemes_path)
+        self.log_message(f"Обработка {len(scheme_files)} схем...")
 
-        for idx, f in enumerate(dir_list, 1):
-            kks = f.replace(".xlsx", "")  # безопаснее, чем strip()
-            self.log_message(f"[{idx}/{len(dir_list)}] Парсинг: {kks}")
-            mtp = mTP()
-            scheme_path = f"{xls_path}/SCHEMES/{f}"
-            table_path = f"{xls_path}/TABLES"
-            mtp.parse_all_related(kks, scheme_path, table_path)
+        for idx, filename in enumerate(scheme_files, 1):
+            if not filename.endswith('.xlsx'):
+                continue
+                
+            kks = filename.replace(".xlsx", "")
+            self.log_message(f"[{idx}/{len(scheme_files)}] Парсинг: {kks}")
+            
+            parser = mTP()
+            scheme_path = os.path.join(schemes_path, filename)
+            parser.parse_all_related(kks, scheme_path, tables_path)
             self.log_message(f"  ✓ Завершено: {kks}")
 
-        self.log_message("\n=== Обработка завершена успешно! ===")
-
     def initUI(self):
-        # Настройка основного окна
+        """Инициализирует пользовательский интерфейс."""
         self.setWindowTitle("Обработка технологических схем (ТЗА)")
         self.setGeometry(200, 100, 1200, 800)
-
-        # Минималистичный фон
         self.setStyleSheet("""
             QWidget {
                 background-color: #f5f5f5;
@@ -263,7 +341,7 @@ class FileProcessorApp(QWidget):
             }
         """)
         self.process_button.setMinimumHeight(80)
-        self.process_button.clicked.connect(self.process_files)
+        self.process_button.clicked.connect(self.start_processing)
 
         # Поле для логов
         self.log_label = QLabel("Логи обработки", self)
@@ -311,16 +389,21 @@ class FileProcessorApp(QWidget):
         self.setLayout(layout)
 
     def select_input_folder(self):
+        """Открывает диалог выбора папки с исходными данными."""
         folder = QFileDialog.getExistingDirectory(self, "Выберите папку с ТЗА")
         if folder:
             self.input_path.setText(folder)
 
     def select_output_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Выберите папку для выгрузки результатов")
+        """Открывает диалог выбора папки для результатов."""
+        folder = QFileDialog.getExistingDirectory(
+            self, "Выберите папку для выгрузки результатов"
+        )
         if folder:
             self.output_path.setText(folder)
 
-    def process_files(self):
+    def start_processing(self):
+        """Запускает процесс обработки файлов."""
         input_folder = self.input_path.text()
         output_folder = self.output_path.text()
 
@@ -328,18 +411,19 @@ class FileProcessorApp(QWidget):
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, укажите оба пути.")
             return
 
-        # Очищаем логи перед новой обработкой
         self.log_text.clear()
 
         try:
-            self.main(self.input_path.text(), self.output_path.text())
-            # Для демонстрации просто покажем сообщение об успешной обработке
+            self.process_files(input_folder, output_folder)
             QMessageBox.information(self, "Успех", "Файлы успешно обработаны!")
         except Exception as e:
             self.log_message(f"\n❌ ОШИБКА: {str(e)}")
-            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке:\n{str(e)}")
+            QMessageBox.critical(
+                self, "Ошибка", f"Произошла ошибка при обработке:\n{str(e)}"
+            )
 
     def closeEvent(self, event):
+        """Обработчик события закрытия окна."""
         cleanup_output_images()
         super().closeEvent(event)
 
